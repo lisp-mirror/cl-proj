@@ -35,7 +35,7 @@
 		     (src-cs "+proj=latlong +ellps=WGS84 +datum=WGS84")
 		     (dst-cs "+proj=utm +zone=35 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")
 		     (debug nil))
-  
+
   "@short{Renders the point with given coordinates using the Proj API and
  adjusts it to be displayed within a screen with given width and height.}
 
@@ -72,11 +72,15 @@ rendered coordinates of the given point.
 	 (o.x (cffi:foreign-alloc :double :count 3))
 	 (o.y (cffi:foreign-alloc :double :count 3)))
 
-    (setf (cffi:mem-aref o.x :double 0) (* (float ox 0.0d0) +DEG-TO-RAD+))
-    (setf (cffi:mem-aref o.y :double 0) (* (float oy 0.0d0) +DEG-TO-RAD+))
+    (setf (cffi:mem-aref o.x :double 0)
+	  (* (float ox 0.0d0) +DEG-TO-RAD+)
+	  (cffi:mem-aref o.y :double 0)
+	  (* (float oy 0.0d0) +DEG-TO-RAD+))
 
-    (setf (cffi:mem-aref o.x :double 1) (* (float (getf extent :minx) 0.0d0) +DEG-TO-RAD+))
-    (setf (cffi:mem-aref o.y :double 1) (* (float (getf extent :miny) 0.0d0) +DEG-TO-RAD+))
+    (setf (cffi:mem-aref o.x :double 1)
+	  (* (float (getf extent :minx) 0.0d0) +DEG-TO-RAD+)
+	  (cffi:mem-aref o.y :double 1)
+	  (* (float (getf extent :miny) 0.0d0) +DEG-TO-RAD+))
 
     (setf (cffi:mem-aref o.x :double 2) (* (float (getf extent :maxx) 0.0d0) +DEG-TO-RAD+))
     (setf (cffi:mem-aref o.y :double 2) (* (float (getf extent :maxy) 0.0d0) +DEG-TO-RAD+))
@@ -263,36 +267,58 @@ this function with following parameters:
 
 ;;---------------------------------------------------------
 
-(defun parse-degrees (pattern str &key dec)
-  "Utility function to parse lines like: 47°7'50
+(defun parse-degrees (pattern str &key dec (start 0))
+  "@short{Utility function to parse string representation of angles
+ like: 47°7'50}
 
-If an optional key DEC is set to true converts parsed data into
-decimal representation with DMS-TO-DEC function."
-  
-  (let ((offset 0)
-	(degs)
-	(mins)
-	(secs))
+ PATTERN is a list that consists of strings and keywords: where :D
+ stands for degrees, :M for minutes and :S for seconds.
+
+ For instance, next command parses 47°7'50.09:
+
+@begin{code}
+ (parse-degrees '(:d \"°\" :m \"'\" :s ) \"47°7'50.09\") => 47 7 50.09
+@end{code}
+
+ If an optional key DEC is set to True, returns decimal representation
+ of the parsed angle."
+  (let ((offset start)
+	(degs 0d0)
+	(mins 0d0)
+	(secs 0d0))
     (dolist (pat pattern)
       (if (stringp pat)
 	  (setf offset (+ offset (length pat)))
 	  (case pat
+	    ;; degrees
 	    (:d (multiple-value-bind (digit chars)
 		    (parse-integer str :start offset :junk-allowed T)
 		  (setf degs digit)
 		  (setf offset chars)))
+	    ;; minutes
 	    (:m (multiple-value-bind (digit chars)
 		    (parse-integer str :start offset :junk-allowed T)
 		  (setf mins digit)
 		  (setf offset chars)))
-	    (:s (multiple-value-bind (digit chars)
-		    (parse-integer str :start offset :junk-allowed T)
-		  (setf secs digit)
-		  (setf offset chars)))
-	    (otherwise (error "unknown pattern")))))
+	    ;; seconds
+	    (:s (let ((end offset))
+		  (loop for i from offset below (length str)
+                     while (or (digit-char-p (char str i))
+                               (char= #\. (char str i)))
+                     do (incf end))
+		  (multiple-value-bind (digit)
+		      (parse-number:parse-number str :start offset :end end)
+		    (setf secs digit)
+		    (setf offset end))))
+            ;; any non-numeric characters are skipped
+            (:any-chars
+             (loop while (and (not (digit-char-p (char str offset)))
+                              (< offset (length str)))
+                do (incf offset)))
+	    (otherwise (error "unknown pattern: ~a" pat)))))
     (if dec
-	(dms-to-dec degs mins secs)
-	(values degs mins secs))))
+	(values (dms-to-dec degs mins secs) offset)
+	(values degs mins secs offset))))
 
 ;; (parse-degrees '(:d "°" :m "'" :s ) "47°7'50.09") => 47 7 50.09
 
