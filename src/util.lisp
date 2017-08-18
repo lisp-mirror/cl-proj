@@ -1,7 +1,7 @@
 ;;; Different utility functions for more convenient usage of the
 ;;; Proj.4 library
 
-;; Copyright (c) 2012, 2013, 2015 Victor Anyakin
+;; Copyright (c) 2012, 2013, 2015, 2017 Victor Anyakin
 ;; <anyakinvictor@yahoo.com> All rights reserved.
 
 ;; Redistribution and use in source and binary forms, with or without
@@ -194,7 +194,7 @@ rendered coordinates of the given point.
 
 (defun perpendicular-distance (point line1 line2)
   "@short{Calculates a distance from a point to the line specified by two
- points.}"
+ points on a Discartes surface.}"
 
   (let ((x_0 (first point))
 	(y_0 (second point))
@@ -383,5 +383,55 @@ this function with following parameters:
 	(values degs mins secs offset))))
 
 ;; (parse-degrees '(:d "°" :m "'" :s ) "47°7'50.09") => 47 7 50.09
+
+;;---------------------------------------------------------
+
+(defun missile-range (lat lon radius &key (count 360) (out T))
+  "Produce a GeoJSON Polygon circumscribing the ciricle with the
+given radius (in meters) with the given center.
+
+Count specifies the number of points the Polygon will contain, the
+higher the number, the smoother the circle.
+
+Example: area within Hwasong-12 missile range when fired from
+Pyongyang? NB: here we assume the range to be 4500, however, Wikipedia
+mentions estimates within range of 3700-6000 km.
+
+  (with-open-file (out \"range.json\" :direction :output :if-exists :supersede)
+    (missile-range 39.033333 125.75 (* 4500 1000) :out out))
+
+The resulting GeoJSON file can be converted to other formats (like
+Google Earth-compatible KML) with the ogr2ogr command-line
+application:
+
+  ogr2ogr -f KML range.kml range.json
+"
+
+  (let ((g (pj:make-geodesic)))
+    (format out "{
+  \"type\": \"Feature\",
+  \"geometry\": {
+    \"type\": \"Polygon\",
+    \"coordinates\": [ [
+")
+    (loop
+       :with step = (/ 360 count)
+       :for azi :from 0 :below 360 :by step
+       :do
+       (progn
+         (multiple-value-bind (lat2 lon2 azi2)
+             (pj:direct-problem g lat lon azi radius)
+           (declare (ignore azi2))
+           ;; in GeoJSON first comes the longitude, then latitude
+           (format out "[~,5f, ~,5f],~%" lon2 lat2))))
+    ;; close the cycle
+    (multiple-value-bind (lat2 lon2 azi2)
+        (pj:direct-problem g lat lon 0 radius)
+      (declare (ignore azi2))
+      (format out "[~,5f, ~,5f]~%" lon2 lat2))
+    (format out "] ]} }")))
+
+;;---------------------------------------------------------
+
 
 ;; EOF
